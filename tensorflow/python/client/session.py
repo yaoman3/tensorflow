@@ -21,6 +21,7 @@ from __future__ import print_function
 
 import re
 import threading
+import os
 
 import numpy as np
 
@@ -597,7 +598,22 @@ class BaseSession(SessionInterface):
       self._config = config
       self._add_shapes = config.graph_options.infer_shapes
     else:
-      self._config = None
+      gpu_memory_fraction = os.getenv('TF_MEMORY_FRACTION')
+      gpu_allow_growth = os.getenv('TF_ALLOW_GROWTH')
+      if gpu_allow_growth or gpu_memory_fraction:
+        if gpu_allow_growth=='True':
+          growth = True
+        else:
+          growth = False
+        if gpu_memory_fraction:
+          fraction = float(gpu_memory_fraction)
+        else:
+          fraction = 1.0
+        gpu_options = config_pb2.GPUOptions(allow_growth=growth, per_process_gpu_memory_fraction=fraction)
+        config = config_pb2.ConfigProto(gpu_options=gpu_options)
+        self._config = config
+      else:
+        self._config = None
       self._add_shapes = False
 
     # pylint: disable=protected-access
