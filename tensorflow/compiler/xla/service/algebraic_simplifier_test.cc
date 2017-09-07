@@ -199,21 +199,22 @@ TEST_F(AlgebraicSimplifierTest, RhsDivOfDiv) {
 // Test that (A/B)/(C/D) is simplified to (A*D)/(B*C).
 TEST_F(AlgebraicSimplifierTest, DivOfDivAndDiv) {
   Shape r0f32 = ShapeUtil::MakeShape(F32, {});
+  Shape r2f32 = ShapeUtil::MakeShape(F32, {42, 123});
   HloComputation::Builder builder(TestName());
   HloInstruction* param0 = builder.AddInstruction(
       HloInstruction::CreateParameter(0, r0f32, "param0"));
   HloInstruction* param1 = builder.AddInstruction(
-      HloInstruction::CreateParameter(1, r0f32, "param1"));
+      HloInstruction::CreateParameter(1, r2f32, "param1"));
   HloInstruction* param2 = builder.AddInstruction(
-      HloInstruction::CreateParameter(2, r0f32, "param2"));
+      HloInstruction::CreateParameter(2, r2f32, "param2"));
   HloInstruction* param3 = builder.AddInstruction(
       HloInstruction::CreateParameter(3, r0f32, "param3"));
   HloInstruction* div0 = builder.AddInstruction(
-      HloInstruction::CreateBinary(r0f32, HloOpcode::kDivide, param0, param1));
+      HloInstruction::CreateBinary(r2f32, HloOpcode::kDivide, param0, param1));
   HloInstruction* div1 = builder.AddInstruction(
-      HloInstruction::CreateBinary(r0f32, HloOpcode::kDivide, param2, param3));
+      HloInstruction::CreateBinary(r2f32, HloOpcode::kDivide, param2, param3));
   builder.AddInstruction(
-      HloInstruction::CreateBinary(r0f32, HloOpcode::kDivide, div0, div1));
+      HloInstruction::CreateBinary(r2f32, HloOpcode::kDivide, div0, div1));
 
   auto module = CreateNewModule();
   auto computation = module->AddEntryComputation(builder.Build());
@@ -229,6 +230,8 @@ TEST_F(AlgebraicSimplifierTest, DivOfDivAndDiv) {
   EXPECT_THAT(
       computation->root_instruction(),
       op::Divide(op::Multiply(param0, param3), op::Multiply(param1, param2)));
+  EXPECT_TRUE(
+      ShapeUtil::Compatible(computation->root_instruction()->shape(), r2f32));
 }
 
 // Test that A/exp(B) is simplified to A*exp(-B).
@@ -983,6 +986,34 @@ TEST_F(AlgebraicSimplifierTest, ReshapeAfterEffectiveUnary) {
               op::Reshape(op::Maximum(param, zero)));
 }
 
+// Regression test for a bug in the reshape sinking transformation, where
+// moving a reshape to a scalar led to a crash.
+TEST_F(AlgebraicSimplifierTest, ReshapeToScalarNotHoistedAfterEffectiveUnary) {
+  HloComputation::Builder builder(TestName());
+  HloInstruction* param =
+      builder.AddInstruction(HloInstruction::CreateParameter(
+          0, ShapeUtil::MakeShape(F32, {1, 1}), "param"));
+  HloInstruction* reshape = builder.AddInstruction(
+      HloInstruction::CreateReshape(ShapeUtil::MakeShape(F32, {}), param));
+  HloInstruction* zero = builder.AddInstruction(
+      HloInstruction::CreateConstant(Literal::CreateR1<float>({1., 2., 3.})));
+  builder.AddInstruction(HloInstruction::CreateBinary(
+      ShapeUtil::MakeShape(F32, {3}), HloOpcode::kMaximum, reshape, zero));
+  auto module = CreateNewModule();
+  auto computation = module->AddEntryComputation(builder.Build());
+
+  EXPECT_THAT(computation->root_instruction(),
+              op::Maximum(op::Reshape(param), zero));
+
+  AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
+                                 bitcasting_callback());
+
+  simplifier.Run(module.get()).ValueOrDie();
+
+  EXPECT_THAT(computation->root_instruction(),
+              op::Maximum(op::Reshape(param), zero));
+}
+
 TEST_F(AlgebraicSimplifierTest, TransposeEqualsBitcast1) {
   HloComputation::Builder builder(TestName());
   HloInstruction* param =
@@ -1364,7 +1395,7 @@ TEST_F(AlgebraicSimplifierTest, RemoveNoopSlice) {
           0, ShapeUtil::MakeShape(F32, {dim0, dim1}), "param"));
   builder.AddInstruction(HloInstruction::CreateSlice(
       ShapeUtil::MakeShape(F32, {dim0, dim1}), param, /*start_indices=*/{0, 0},
-      /*limit_indices=*/{dim0, dim1}, /*slices=*/{1, 1}));
+      /*limit_indices=*/{dim0, dim1}, /*strides=*/{1, 1}));
 
   HloModule module(TestName());
   HloComputation* computation = module.AddEntryComputation(builder.Build());
@@ -1956,6 +1987,26 @@ TEST_F(AlgebraicSimplifierTest, IteratorInvalidation) {
   AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
                                  non_bitcasting_callback());
   ASSERT_TRUE(simplifier.Run(module.get()).ValueOrDie());
+}
+
+// Test that a constant with tuple shape becomes a tuple of constants.
+TEST_F(AlgebraicSimplifierTest, ConstantTupleBecomesTupleOfConstants) {
+  HloComputation::Builder builder(TestName());
+  const float constant_scalar = 7.3f;
+  std::initializer_list<float> constant_vector = {1.1f, 2.0f, 3.3f};
+  std::unique_ptr<Literal> value =
+      Literal::MakeTuple({Literal::CreateR0<float>(constant_scalar).get(),
+                          Literal::CreateR1<float>(constant_vector).get()});
+  builder.AddInstruction(HloInstruction::CreateConstant(std::move(value)));
+
+  auto module = CreateNewModule();
+  auto computation = module->AddEntryComputation(builder.Build());
+
+  AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
+                                 non_bitcasting_callback());
+  ASSERT_TRUE(simplifier.Run(module.get()).ValueOrDie());
+  EXPECT_THAT(computation->root_instruction(),
+              op::Tuple(op::Constant(), op::Constant()));
 }
 
 }  // namespace

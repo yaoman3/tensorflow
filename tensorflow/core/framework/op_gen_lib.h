@@ -18,8 +18,6 @@ limitations under the License.
 
 #include <string>
 #include <unordered_map>
-#include "tensorflow/core/framework/op_def.pb.h"  // TODO(b/62899350): Remove
-#include "tensorflow/core/framework/op_gen_overrides.pb.h"  // TODO(b/62899350): Remove
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/env.h"
@@ -42,6 +40,11 @@ string WordWrap(StringPiece prefix, StringPiece str, int width);
 // (and any following spaces) from *description and return true.  Otherwise
 // returns false.
 bool ConsumeEquals(StringPiece* description);
+
+// Convert text-serialized protobufs to/from multiline format.
+string PBTxtToMultiline(StringPiece pbtxt,
+                        const std::vector<string>& multi_line_fields);
+string PBTxtFromMultiline(StringPiece multiline_pbtxt);
 
 // Takes a list of files with OpGenOverrides text protos, and allows you to
 // look up the specific override for any given op.

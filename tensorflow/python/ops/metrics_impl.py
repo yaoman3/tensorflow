@@ -296,7 +296,7 @@ def mean(values, weights=None, metrics_collections=None,
   returned as `mean` which is an idempotent operation that simply divides
   `total` by `count`.
 
-  For estimation of the metric  over a stream of data, the function creates an
+  For estimation of the metric over a stream of data, the function creates an
   `update_op` operation that updates these variables and returns the `mean`.
   `update_op` increments `total` with the reduced sum of the product of `values`
   and `weights`, and it increments `count` with the reduced sum of `weights`.
@@ -366,7 +366,7 @@ def accuracy(labels, predictions, weights=None, metrics_collections=None,
   matches `labels`. This frequency is ultimately returned as `accuracy`: an
   idempotent operation that simply divides `total` by `count`.
 
-  For estimation of the metric  over a stream of data, the function creates an
+  For estimation of the metric over a stream of data, the function creates an
   `update_op` operation that updates these variables and returns the `accuracy`.
   Internally, an `is_correct` operation computes a `Tensor` with elements 1.0
   where the corresponding elements of `predictions` and `labels` match and 0.0
@@ -463,10 +463,16 @@ def _confusion_matrix_at_thresholds(
       if include not in all_includes:
         raise ValueError('Invaild key: %s.' % include)
 
-  predictions, labels, weights = _remove_squeezable_dimensions(
-      predictions=math_ops.to_float(predictions),
-      labels=math_ops.cast(labels, dtype=dtypes.bool),
-      weights=weights)
+  with ops.control_dependencies([
+      check_ops.assert_greater_equal(
+          predictions, 0.0, message='predictions must be in [0, 1]'),
+      check_ops.assert_less_equal(
+          predictions, 1.0, message='predictions must be in [0, 1]')
+  ]):
+    predictions, labels, weights = _remove_squeezable_dimensions(
+        predictions=math_ops.to_float(predictions),
+        labels=math_ops.cast(labels, dtype=dtypes.bool),
+        weights=weights)
 
   num_thresholds = len(thresholds)
 
@@ -614,7 +620,7 @@ def auc(labels, predictions, weights=None, num_thresholds=200,
   """
   with variable_scope.variable_scope(
       name, 'auc', (labels, predictions, weights)):
-    if curve != 'ROC' and  curve != 'PR':
+    if curve != 'ROC' and curve != 'PR':
       raise ValueError('curve must be either ROC or PR, %s unknown' %
                        (curve))
     kepsilon = 1e-7  # to account for floating point imprecisions
@@ -1067,7 +1073,7 @@ def mean_tensor(values, weights=None, metrics_collections=None,
   `values`. This average is ultimately returned as `mean` which is an idempotent
   operation that simply divides `total` by `count`.
 
-  For estimation of the metric  over a stream of data, the function creates an
+  For estimation of the metric over a stream of data, the function creates an
   `update_op` operation that updates these variables and returns the `mean`.
   `update_op` increments `total` with the reduced sum of the product of `values`
   and `weights`, and it increments `count` with the reduced sum of `weights`.
@@ -1329,7 +1335,7 @@ def precision(labels, predictions, weights=None,
   operation that simply divides `true_positives` by the sum of `true_positives`
   and `false_positives`.
 
-  For estimation of the metric  over a stream of data, the function creates an
+  For estimation of the metric over a stream of data, the function creates an
   `update_op` operation that updates these variables and returns the
   `precision`. `update_op` weights each prediction by the corresponding value in
   `weights`.
@@ -1522,7 +1528,7 @@ def recall(labels, predictions, weights=None,
   ultimately returned as `recall`, an idempotent operation that simply divides
   `true_positives` by the sum of `true_positives`  and `false_negatives`.
 
-  For estimation of the metric  over a stream of data, the function creates an
+  For estimation of the metric over a stream of data, the function creates an
   `update_op` that updates these variables and returns the `recall`. `update_op`
   weights each prediction by the corresponding value in `weights`.
 
@@ -2453,7 +2459,7 @@ def _streaming_sparse_average_precision_at_top_k(labels,
   Returns:
     mean_average_precision: Scalar `float64` `Tensor` with the mean average
       precision values.
-    update: `Operation` that increments  variables appropriately, and whose
+    update: `Operation` that increments variables appropriately, and whose
       value matches `metric`.
   """
   with ops.name_scope(name, 'average_precision_at_top_k',
@@ -2551,7 +2557,7 @@ def sparse_average_precision_at_k(labels,
   Returns:
     mean_average_precision: Scalar `float64` `Tensor` with the mean average
       precision values.
-    update: `Operation` that increments  variables appropriately, and whose
+    update: `Operation` that increments variables appropriately, and whose
       value matches `metric`.
 
   Raises:

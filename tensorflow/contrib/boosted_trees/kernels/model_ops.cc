@@ -18,7 +18,6 @@
 #include "tensorflow/contrib/boosted_trees/proto/tree_config.pb.h"
 #include "tensorflow/contrib/boosted_trees/resources/decision_tree_ensemble_resource.h"
 #include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/framework/resource_handle.pb.h"
 #include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
@@ -75,7 +74,7 @@ class TreeEnsembleStampTokenOp : public OpKernel {
         decision_tree_ensemble_resource;
     OP_REQUIRES_OK(context, LookupResource(context, HandleFromInput(context, 0),
                                            &decision_tree_ensemble_resource));
-    mutex_lock l(*decision_tree_ensemble_resource->get_mutex());
+    tf_shared_lock l(*decision_tree_ensemble_resource->get_mutex());
     core::ScopedUnref unref_me(decision_tree_ensemble_resource);
     Tensor* output_stamp_token_t = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(0, TensorShape(),
@@ -96,7 +95,7 @@ class TreeEnsembleSerializeOp : public OpKernel {
         decision_tree_ensemble_resource;
     OP_REQUIRES_OK(context, LookupResource(context, HandleFromInput(context, 0),
                                            &decision_tree_ensemble_resource));
-    mutex_lock l(*decision_tree_ensemble_resource->get_mutex());
+    tf_shared_lock l(*decision_tree_ensemble_resource->get_mutex());
     core::ScopedUnref unref_me(decision_tree_ensemble_resource);
     Tensor* output_stamp_token_t = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(0, TensorShape(),

@@ -477,27 +477,7 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
   static ContextInfo biasaddgrad_matmul_context_;
   static ContextInfo biasaddgrad_conv2dwithbias_context_;
 
-  /// Hash table to maintain nodes visited in the graph.
-  std::unordered_set<const Node*> visited_nodes_;
-
  private:
-  // Check if we rewrote node 'n'
-  //
-  // If we rewrote the node, then the rewritten node will produce
-  // Mkl tensor as output. If we did not rewrite the node, then
-  // we need to insert dummy Mkl node on the input side.
-  //
-  // Returns true if node is rewritten, false otherwise.
-  inline bool IsRewrittenNode(Node* n) const {
-    return visited_nodes_.find(n) != visited_nodes_.end();
-  }
-
-  // Mark the node as rewritten
-  inline void MarkRewrittenNode(Node* n) { visited_nodes_.insert(n); }
-
-  // Clear all visited nodes
-  inline void UnMarkRewrittenNodes() { visited_nodes_.clear(); }
-
   // Is OpDef::ArgDef a list type? It could be N * T or list(type).
   // Refer to opdef.proto for details of list type.
   inline bool ArgIsList(const OpDef::ArgDef& arg) const {
@@ -1087,15 +1067,13 @@ void MklLayoutRewritePass::GetNodeProducingMklTensor(std::unique_ptr<Graph>* g,
   CHECK_NOTNULL(n);
   CHECK_NOTNULL(mkl_node);
   CHECK_NOTNULL(mkl_node_output_slot);
-  if (IsRewrittenNode(n)) {
-    // If we have visited this node and rewritten it, then it will generate
-    // an edge that will receive Mkl tensor from a node.
-    // First, let's assert that this op is Mkl layer.
-    DataType T;
-    TF_CHECK_OK(GetNodeAttr(n->def(), "T", &T));
-    // If this op has been rewritten, then its name must have been same as
-    // Mkl op.
-    CHECK_EQ(mkl_op_registry::IsMklOp(n->type_string(), T), true);
+
+  // If this is an MKL op, then it will create extra output for MKL layout.
+  DataType T;
+  if (GetNodeAttr(n->def(), "T", &T).ok() &&
+      mkl_op_registry::IsMklOp(n->type_string(), T)) {
+    // If this is an MKL op, then it will generate an edge that will receive
+    // Mkl tensor from a node.
     // output slot number for Mkl tensor would be N+slot number of TensorFlow
     // tensor, where N is total number of TensorFlow tensors.
     *mkl_node = n;
@@ -1121,6 +1099,44 @@ int MklLayoutRewritePass::SetUpContiguousInputs(
   CHECK_NOTNULL(workspace_tensors);
   CHECK_EQ(kTensorOrdering, MklTfTensorOrdering::TENSORS_CONTIGUOUS);
 
+  // TODO(nhasabni): Temporary solution to connect filter input of
+  // BackpropInput with the converted filter from Conv2D.
+  bool do_connect_conv2d_backprop_input_filter = false;
+  Node* conv2d_node = nullptr;
+  // Filter node is 2nd input (slot index 1) of Conv2D.
+  int kConv2DFilterInputSlotIdx = 1;
+  int kConv2DBackpropInputFilterInputSlotIdx = 1;
+  int kConv2DFilterOutputSlotIdx = 1;
+  if (old_node->type_string() == csinfo_.conv2d_grad_input) {
+    // We need to find Conv2D node from Conv2DBackpropInput.
+    // For that let's first find filter node that is 2nd input (slot 1)
+    // of BackpropInput.
+    Node* filter_node = nullptr;
+    old_node->input_node(kConv2DBackpropInputFilterInputSlotIdx, &filter_node);
+    CHECK_NOTNULL(filter_node);
+
+    // Now check which nodes receive from filter_node. Filter feeds as
+    // 2nd input (slot 1) of _MklConv2D and _MklConv2DWithBias.
+    for (const Edge* e : filter_node->out_edges()) {
+      if (e->dst()->type_string() == csinfo_.mkl_conv2d &&
+          e->dst_input() == kConv2DFilterInputSlotIdx
+          /* filter is 2nd input of Conv2D and _MklConv2D. */) {
+        if (conv2d_node != nullptr) {
+          VLOG(1) << "MklLayoutRewritePass: unusual case of same filter"
+                  << " feeding multiple Conv2D nodes: "
+                  << filter_node->DebugString();
+          // We will not connect filter input of Conv2DBackpropInput
+          // to be safe here.
+          do_connect_conv2d_backprop_input_filter = false;
+          break;
+        } else {
+          conv2d_node = e->dst();
+          do_connect_conv2d_backprop_input_filter = true;
+        }
+      }
+    }
+  }
+
   // Number of input slots to original op
   // Input slots are represented by .Input() calls in REGISTER_OP.
   int old_node_input_slots = old_node->op_def().input_arg_size();
@@ -1144,7 +1160,13 @@ int MklLayoutRewritePass::SetUpContiguousInputs(
       nb->Input(new_node_inputs);
       nn_slot_idx++;
     } else {
-      nb->Input(old_node_inputs[iidx].first, old_node_inputs[iidx].second);
+      // Special case for connecting filter input of Conv2DBackpropInput
+      if (do_connect_conv2d_backprop_input_filter &&
+          iidx == kConv2DBackpropInputFilterInputSlotIdx) {
+        nb->Input(conv2d_node, kConv2DFilterOutputSlotIdx);
+      } else {
+        nb->Input(old_node_inputs[iidx].first, old_node_inputs[iidx].second);
+      }
       iidx++;
       nn_slot_idx++;
     }
@@ -1179,9 +1201,17 @@ int MklLayoutRewritePass::SetUpContiguousInputs(
     } else {
       Node* mkl_node = nullptr;
       int mkl_node_output_slot = 0;
-      GetNodeProducingMklTensor(g, old_node, old_node_inputs[iidx].first,
-                                old_node_inputs[iidx].second,
-                                &mkl_node, &mkl_node_output_slot);
+      // Special case for connecting filter input of Conv2DBackpropInput
+      if (do_connect_conv2d_backprop_input_filter &&
+          iidx == kConv2DBackpropInputFilterInputSlotIdx) {
+        GetNodeProducingMklTensor(g, old_node, conv2d_node,
+                                  kConv2DFilterOutputSlotIdx,
+                                  &mkl_node, &mkl_node_output_slot);
+      } else {
+        GetNodeProducingMklTensor(g, old_node, old_node_inputs[iidx].first,
+                                  old_node_inputs[iidx].second,
+                                  &mkl_node, &mkl_node_output_slot);
+      }
       nb->Input(mkl_node, mkl_node_output_slot);
       iidx++;
       nn_slot_idx++;
@@ -1801,7 +1831,6 @@ Status MklLayoutRewritePass::MergeNode(std::unique_ptr<Graph>* g, Node* succ,
 
     (*g)->RemoveNode(succ);
     (*g)->RemoveNode(pred);
-    MarkRewrittenNode(new_node);
 
     return Status::OK();
   }
@@ -1932,7 +1961,6 @@ Status MklLayoutRewritePass::RewriteNode(std::unique_ptr<Graph>* g,
 
   // Delete original node and mark new node as rewritten.
   (*g)->RemoveNode(orig_node);
-  MarkRewrittenNode(new_node);
 
   VLOG(1) << "MklLayoutRewritePass: New node:" << new_node->DebugString();
   return Status::OK();
@@ -2061,9 +2089,6 @@ bool MklLayoutRewritePass::RunPass(std::unique_ptr<Graph>* g) {
   }
 
   DumpGraph("After running MklLayoutRewritePass", &**g);
-
-  // Clear marked nodes as the same graph pass may be used multiple times.
-  UnMarkRewrittenNodes();
 
   return result;
 }

@@ -27,6 +27,8 @@ The TensorFlow community has created many great projects around TensorFlow, incl
 * [Operator Vectorization Library](https://github.com/opveclib/opveclib)
 * [Swift language bindings](https://github.com/PerfectlySoft/Perfect-TensorFlow)
 * [Sublime Tensorflow - A plugin for Sublime Text](https://github.com/baptisteArnaud/Sublime-Tensorflow)
+* [Edward - A library for probabilistic modeling, inference, and criticism](http://edwardlib.org) ([Github](https://github.com/blei-lab/edward), [Forum](https://discourse.edwardlib.org))
+* [GPflow - Gaussian processes in TensorFlow](https://github.com/GPflow/GPflow)
 
 ## TensorFlow Communities Around the World
 
@@ -35,6 +37,7 @@ Asia:
 * [TensorFlow Korea (TF-KR) User Group](https://www.facebook.com/groups/TensorFlowKR/) _(Korean language)_
 * [TensorFlow User Group Tokyo](https://tfug-tokyo.connpass.com/) _(Japanese Language)_
 * [Soleil Data Dojo](https://soleildatadojo.connpass.com/) _(Japanese language)_
+* [TensorFlow User Group Utsunomiya](https://tfug-utsunomiya.connpass.com/)
 
 
 Europe:

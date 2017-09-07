@@ -20,6 +20,8 @@ package(
     default_visibility = [":internal"],
 )
 
+load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda_is_configured")
+
 cc_library(
     name = "xla_compiler",
     srcs = [
@@ -29,7 +31,10 @@ cc_library(
         "xla_helpers.cc",
         "xla_op_kernel.cc",
         "xla_op_registry.cc",
-    ],
+        "xla_cpu_backend.cc",
+    ] + if_cuda_is_configured([
+        "xla_gpu_backend.cc",
+    ]),
     hdrs = [
         "xla_compilation_device.h",
         "xla_compiler.h",
@@ -102,6 +107,7 @@ cc_test(
         "//tensorflow/cc:ops",
         "//tensorflow/compiler/tf2xla/kernels:xla_ops",
         "//tensorflow/compiler/xla:literal_util",
+        "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/client:client_library",
         "//tensorflow/compiler/xla/client:local_client",
         "//tensorflow/compiler/xla/tests:literal_test_util",
